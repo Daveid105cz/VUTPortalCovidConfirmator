@@ -1,4 +1,4 @@
-﻿#VUT Covid potvrzovač bezinfekčnosti
+﻿# VUT Covid potvrzovač bezinfekčnosti
 
 
 Jednoduchá Android aplikace, která se přihlásí na VUT Intraportál a odklikne za vás ten otravný formulář na potvrzení o bezinfekčnosti.
