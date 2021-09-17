@@ -150,7 +150,7 @@ namespace VUTPortalConfirmator
                     { "formID", "prohlaseni-o-bezinfekcnosti-2" },
                     { "xs_prohlaseni__o__bezinfekcnosti__2", xsid },
                     { "prijezdNa24h-2","0"},
-                    { "btnNepodepsat-2","1" }   //change this for "podepsat" in the end
+                    { "btnPodepsat-2","1" }   //change this for "podepsat" in the end
                 };
 
             StateChanged?.Invoke(4, "Posílání potvrzovacího formuláře");
