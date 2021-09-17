@@ -1,4 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Potvrzovač VUT bezinfekčnosti</string>
-    <string name="action_settings">Settings</string>
+    <string name="hyperlink">
+      <a href="https://www.vut.cz/studis/student.phtml?sn=prohlaseni_studenta">Otevřít formulář v prohlížeči</a>
+    </string>
+  <string name="time_of_display">Čas zobrazení:</string>
+  <string name="notification_time_warning">Notifikace se nemusí vždy zobrazit přesně na čas. Může se spozdit až o několik minut</string>
 </resources>

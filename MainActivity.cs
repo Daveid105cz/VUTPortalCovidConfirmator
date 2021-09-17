@@ -16,10 +16,18 @@ using System.Threading.Tasks;
 using Java.Security;
 using Android.Preferences;
 using Android.Content;
+using System.Text;
+using Android.Views.InputMethods;
+using Android.Graphics;
+using Android.Support.V4.App;
+using Android.Text.Method;
 
 namespace VUTPortalConfirmator
 {
-    [Activity(Label = "@string/app_name", Theme = "@style/AppTheme.NoActionBar", MainLauncher = true)]
+    [Activity(Label = "@string/app_name", Theme = "@style/AppTheme.NoActionBar", MainLauncher = true, 
+        ScreenOrientation = Android.Content.PM.ScreenOrientation.Portrait, 
+        ConfigurationChanges =Android.Content.PM.ConfigChanges.Orientation|Android.Content.PM.ConfigChanges.ScreenSize|Android.Content.PM.ConfigChanges.KeyboardHidden,
+        LaunchMode =Android.Content.PM.LaunchMode.SingleInstance)]
     public class MainActivity : AppCompatActivity
     {
         Button confirmButton;
@@ -29,6 +37,34 @@ namespace VUTPortalConfirmator
         ProgressBar circleBar;
         ProgressBar progressBar;
         TextView statusTextView;
+        RelativeLayout mainLayout;
+
+        MySettings settings;
+
+        protected override void OnNewIntent(Intent intent)
+        {
+            Intent = intent;
+            CheckIntentForNotification();
+            base.OnNewIntent(intent);
+
+        }
+
+        long lastNotifTime = 0;
+        private void CheckIntentForNotification()
+        {
+            var bundle = Intent.Extras;
+            if (bundle == null)
+                return;
+            bool shouldConfirm = bundle.GetBoolean("confirmForm", false);
+            long notifTime = bundle.GetLong("notifTime", 0);
+            if (shouldConfirm && notifTime != lastNotifTime)
+            {
+                lastNotifTime = notifTime;
+                //Proceed with confirmation
+                MyNotificationManager.CancelNotification(this);
+                Confirm();
+            }
+        }
         protected override void OnCreate(Bundle savedInstanceState)
         {
             base.OnCreate(savedInstanceState);
@@ -45,21 +81,42 @@ namespace VUTPortalConfirmator
             circleBar = FindViewById<ProgressBar>(Resource.Id.circleBar);
             progressBar = FindViewById<ProgressBar>(Resource.Id.progressBar);
             statusTextView = FindViewById<TextView>(Resource.Id.statusText);
+            mainLayout = FindViewById<RelativeLayout>(Resource.Id.relativeLayout1);
+            TextView linkTextView = FindViewById<TextView>(Resource.Id.linkTextView);
+            linkTextView.MovementMethod = LinkMovementMethod.Instance;
 
-            confirmButton.Click += ConfirmButton_Click;
+            FloatingActionButton notifSettingsBtn = FindViewById<FloatingActionButton>(Resource.Id.notificationSettingsFab);
+            notifSettingsBtn.Click += (s, e) =>
+            {
+                NotificationSettingsDialog nsd = new NotificationSettingsDialog(this,settings);
+                nsd.Show();
+            };
 
-            TryLoadCredentials();
+            confirmButton.Click += (s, e) => { Confirm(); };
+
+
+            settings = new MySettings();
+            settings.Load(this);
+
+
+            RecheckNotifications();
+            LoadCredentials();
+            CheckIntentForNotification();
         }
 
-        private async void ConfirmButton_Click(object sender, EventArgs e)
+        private void RecheckNotifications()
         {
-            loginText.ClearFocus();
-            passwordText.ClearFocus();
-            savePasswordCheckBox.RequestFocus();
+            if (settings.EnableNotifications &&  !MyNotificationManager.IsNotificationRegistered(this))
+                MyNotificationManager.UpdateNotificationRegistration(this, settings);
+        }
+
+        private async void Confirm()
+        {
+            HideKeyboard();
             String login = loginText.Text;
             String password = passwordText.Text;
             bool savePsswd = savePasswordCheckBox.Checked;
-            if(savePsswd)
+            if (savePsswd)
             {
                 SaveCredentials(login, password);
             }
@@ -69,171 +126,76 @@ namespace VUTPortalConfirmator
             }
             circleBar.Visibility = ViewStates.Visible;
             statusTextView.Visibility = ViewStates.Visible;
-            statusTextView.Text = "Stahování VUT stránky";
-            progressBar.Progress = 1;
-
             try
             {
-                var result = await LoginToVUT(login, password);
-                if (result == null)
+                VUTPortal portal = new VUTPortal();
+                portal.StateChanged += (i, s) =>
                 {
-                    View view = (View)sender;
-                    Snackbar.Make(view, "Přihlášení selhalo. Nejspíš špatný heslo. Možná taky moje chyba. Who cares, já rozhodně ne. Zkus web.", Snackbar.LengthIndefinite)
-                        .SetAction("pepega", (Android.Views.View.IOnClickListener)null).Show();
-
+                    progressBar.Progress = i;
+                    statusTextView.Text = s;
+                };
+                var lResult = await portal.LoginAndConfirmForm(login, password);
+                if (lResult.Item1 == ConfirmationResult.Success)
+                {
+                    MakeSnackbar(lResult.Item2, Color.ForestGreen);
+                    circleBar.Visibility = ViewStates.Invisible;
+                }
+                else if (lResult.Item1 == ConfirmationResult.Failure)
+                {
+                    MakeSnackbar(lResult.Item2, Color.Red);
                     circleBar.Visibility = ViewStates.Invisible;
                     statusTextView.Visibility = ViewStates.Invisible;
                     progressBar.Progress = 0;
                 }
                 else
                 {
-                    statusTextView.Text = "Stahování potvrzovacího formuláře";
-                    progressBar.Progress = 3;
-                    var isConfirmed = await ConfirmCovidForm(result);
-                    if(!String.IsNullOrEmpty(isConfirmed))
-                    {
-                        circleBar.Visibility = ViewStates.Invisible;
-                        statusTextView.Text = isConfirmed;
-                        progressBar.Progress = 4;
-                    }
-                    else
-                    {
-                        circleBar.Visibility = ViewStates.Invisible;
-                        statusTextView.Visibility = ViewStates.Invisible;
-                        progressBar.Progress = 0;
-                        View view = (View)sender;
-                        Snackbar.Make(view, "Nepodařilo se potvrdit formulář", Snackbar.LengthIndefinite)
-                            .SetAction("pepega", (Android.Views.View.IOnClickListener)null).Show();
-                    }
-
+                    MakeSnackbar(lResult.Item2, Color.Orange);
+                    circleBar.Visibility = ViewStates.Invisible;
+                    statusTextView.Visibility = ViewStates.Invisible;
+                    progressBar.Progress = 0;
                 }
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 circleBar.Visibility = ViewStates.Invisible;
                 statusTextView.Visibility = ViewStates.Invisible;
                 progressBar.Progress = 0;
-                Log.Error("Chyba",ex.ToString());
-                View view = (View)sender;
-                Snackbar.Make(view, "Zkuste znovu. Kód vyhodil výjímku. To se občas stane.", Snackbar.LengthIndefinite)
-                    .SetAction("pepega", (Android.Views.View.IOnClickListener)null).Show();
+                Log.Error("[VUTConf] MainActivity", ex.ToString());
+                MakeSnackbar("Zkuste znovu. Kód vyhodil výjímku. To se občas stane.", Color.Orange);
+
             }
         }
 
-        private async Task<string> ConfirmCovidForm(CookieContainer cookies)
-        {
-            HttpClientHandler handler = new HttpClientHandler();
-            handler.CookieContainer = cookies;
-            handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
-            using (HttpClient confirmClient = new HttpClient(handler))
-            {
-                var xs_prohl_id = await FetchPageAndGetRegexMatch(confirmClient, "https://www.vut.cz/studis/student.phtml?sn=prohlaseni_studenta", @"<input type=""hidden"" id=""xs_prohlaseni__o__bezinfekcnosti__2"" name=""xs_prohlaseni__o__bezinfekcnosti__2"" value=""([A-z0-9]*?)"" \/>");
-
-                if (xs_prohl_id == null)
-                    return String.Empty;
-
-                var values = new Dictionary<string, string>
-                {
-                    { "formID", "prohlaseni-o-bezinfekcnosti-2" },
-                    { "xs_prohlaseni__o__bezinfekcnosti__2", xs_prohl_id },
-                    { "prijezdNa24h-2","0"},
-                    { "btnPodepsat-2","1" }   //change this for "podepsat" in the end
-                };
-                statusTextView.Text = "Posílání potvrzovacího formuláře";
-                progressBar.Progress = 4;
-                var content = new FormUrlEncodedContent(values);
-
-                var response = await confirmClient.PostAsync("https://www.vut.cz/studis/student.phtml?sn=prohlaseni_studenta", content);
-                var responseContent = await response.Content.ReadAsStringAsync();
-
-                var alertText = RegexCapture(responseContent, @"<div class=""alert-text""><div>(.*?)<\/div><\/div>");
-                if (alertText == null)
-                    return String.Empty;
-                //var responseString = await response.Content.ReadAsStringAsync();
-                return alertText;
-            }
-            return String.Empty;
-        }
-        private async Task<CookieContainer> LoginToVUT(string login, string password)
-        {
-            CookieContainer cookies = new CookieContainer();
-            HttpClientHandler handler = new HttpClientHandler();
-            handler.CookieContainer = cookies;
-            handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
-            using (HttpClient loginClient = new HttpClient(handler))
-            {
-                var fdkey = await FetchPageAndGetRegexMatch(loginClient, "https://www.vut.cz/login/", @"<input type=""hidden"" name=""sv\[fdkey\]"" value=""(.*)"">");
-
-                if (fdkey == null)
-                    return null;
-                statusTextView.Text = "Přihlašování do intraportálu";
-                progressBar.Progress = 2;
-                var values = new Dictionary<string, string>
-                {
-                    { "special_p4_form", "1" },
-                    { "login_form", "1" },
-                    { "sentTime",DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()},
-                    {"LDAPlogin",login },
-                    {"LDAPpasswd" ,password},
-                    {"sv[fdkey]",fdkey }
-                };
-
-                var content = new FormUrlEncodedContent(values);
-
-                var response = await loginClient.PostAsync("https://www.vut.cz/login/in", content);
-
-                var cook = cookies.GetCookies(new Uri("https://www.vut.cz"));
-                var isLoggedIn = cook["portal_is_logged_in"];
-                if(isLoggedIn != null && isLoggedIn.Value=="1")
-                {
-                    //Login success
-                    return cookies;
-                }
-                else
-                {
-                    //Login fail
-                    return null;
-                }
-            }
-
-        }
-        private async Task<String> FetchPageAndGetRegexMatch(HttpClient client,String uri, String regexPattern)
-        {
-            var page = await client.GetAsync(uri);
-            var pageContent = await page.Content.ReadAsStringAsync();
-
-            return RegexCapture(pageContent, regexPattern);
-        }
-        private String RegexCapture(String text, String pattern)
-        {
-            var regexResult = Regex.Match(text, pattern, RegexOptions.RightToLeft);
-
-            if (regexResult.Groups.Count != 2)
-            {
-                return null;
-            }
-            return regexResult.Groups[1].Value;
-        }
         private void SaveCredentials(string login, string password)
         {
-            ISharedPreferences sharedPref = PreferenceManager.GetDefaultSharedPreferences(this);
-            ISharedPreferencesEditor editor = sharedPref.Edit();
-            editor.PutString("login", login).PutString("password", password).Apply();
+            settings.Load(this);
+            settings.Login = login;
+            settings.Password = password;
+            settings.Save(this);
         }
-        private void TryLoadCredentials()
+        private void LoadCredentials()
         {
-
-            ISharedPreferences sharedPref = PreferenceManager.GetDefaultSharedPreferences(this);
-            loginText.Text = sharedPref.GetString("login", "");
-            String passwd = sharedPref.GetString("password", "");
-            passwordText.Text = passwd;
-            if(passwd!=String.Empty)
-            {
-                savePasswordCheckBox.Checked = true;
-            }
+            loginText.Text = settings.Login;
+            passwordText.Text = settings.Password;
+            savePasswordCheckBox.Checked = settings.IsPassworBeingSaved;
 
         }
-
+        private void HideKeyboard()
+        {
+            try
+            {
+                InputMethodManager imm = (InputMethodManager)GetSystemService(Context.InputMethodService);
+                imm.HideSoftInputFromWindow(mainLayout.WindowToken, 0);
+            }
+            catch { }
+        }
+        private void MakeSnackbar(String text, Color backgroundColor)
+        {
+            var snack = Snackbar.Make(mainLayout, text, Snackbar.LengthLong)
+                .SetAction(".", (Android.Views.View.IOnClickListener)null);
+            snack.View.SetBackgroundColor(backgroundColor);
+            snack.Show();
+        }
 
         public override void OnRequestPermissionsResult(int requestCode, string[] permissions, [GeneratedEnum] Android.Content.PM.Permission[] grantResults)
         {
